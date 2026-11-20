@@ -1,4 +1,4 @@
-package com.miet.tpp.messagebroker.protocol;
+package com.miet.tpp.messagebroker.server;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -15,6 +15,7 @@ import com.miet.tpp.messagebroker.codec.FrameReader;
 import com.miet.tpp.messagebroker.codec.FrameWriter;
 import com.miet.tpp.messagebroker.codec.Reader;
 import com.miet.tpp.messagebroker.codec.Writer;
+import com.miet.tpp.messagebroker.messages.Client;
 import com.miet.tpp.messagebroker.messages.ReentrantRWBroker;
 
 /**

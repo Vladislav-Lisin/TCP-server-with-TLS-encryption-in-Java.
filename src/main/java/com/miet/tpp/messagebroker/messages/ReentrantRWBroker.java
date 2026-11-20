@@ -5,8 +5,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import com.miet.tpp.messagebroker.protocol.Client;
-
 /*
  * ReentrantRWBroker
  */

@@ -1,7 +1,6 @@
-package com.miet.tpp.messagebroker.protocol;
+package com.miet.tpp.messagebroker.messages;
 
 import com.miet.tpp.messagebroker.brokerQueue.IBlockingQueue;
-import com.miet.tpp.messagebroker.messages.Message;
 
 /**
  * Client
