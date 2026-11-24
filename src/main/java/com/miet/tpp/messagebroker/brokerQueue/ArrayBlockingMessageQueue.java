@@ -1,6 +1,7 @@
 package com.miet.tpp.messagebroker.brokerQueue;
 
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import com.miet.tpp.messagebroker.messages.Message;
 
@@ -28,18 +29,24 @@ public class ArrayBlockingMessageQueue implements IBlockingQueue {
         messages.put(message);
     }
 
-    public Message take() throws InterruptedException {
-        while (!closed || !messages.isEmpty()) {
-            Message message = messages.poll();
+    public boolean offer(Message message) {
+        if (closed) {
+            throw new IllegalStateException("Queue is closed");
+        }
 
+        return messages.offer(message);
+    }
+
+    public Message take() throws InterruptedException {
+        while (true) {
+            Message message = messages.poll(100, TimeUnit.MILLISECONDS);
             if (message != null) {
                 return message;
             }
-
-            Thread.sleep(10);
+            if (closed && messages.isEmpty()) {
+                return null;
+            }
         }
-
-        return null;
     }
 
     public void close() {

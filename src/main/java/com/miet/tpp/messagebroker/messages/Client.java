@@ -18,8 +18,13 @@ public class Client {
         return clientId;
     }
 
-    public void addNewMessage(Message message) throws InterruptedException {
-        outgoingMessages.put(message);
+    /** false — исходящая очередь переполнена или клиент уже отключился. */
+    public boolean addNewMessage(Message message) {
+        try {
+            return outgoingMessages.offer(message);
+        } catch (IllegalStateException e) {
+            return false;
+        }
     }
 
     public Message getNewMessage() throws InterruptedException {

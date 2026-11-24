@@ -36,6 +36,20 @@ public class CustomBlockingQueue implements IBlockingQueue{
         notifyAll();
     }
 
+    public synchronized boolean offer(Message message) {
+        if (closed) {
+            throw new IllegalStateException("Queue is closed");
+        }
+        if (countMes == queueCap) {
+            return false;
+        }
+        messages[newMesInd] = message;
+        newMesInd = (newMesInd + 1) % queueCap;
+        countMes++;
+        notifyAll();
+        return true;
+    }
+
     public synchronized Message take() throws InterruptedException{
         while(countMes == 0 && !closed){
             wait();

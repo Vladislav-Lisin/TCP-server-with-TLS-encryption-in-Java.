@@ -5,12 +5,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import com.miet.tpp.messagebroker.stats.BrokerStats;
+
 /*
  * ReentrantRWBroker
  */
-public class ReentrantRWBroker {
+public class ReentrantRWBroker implements Broker {
     private final ReentrantReadWriteLock  lock = new ReentrantReadWriteLock();
-    private Map<String, Topic> topiksMap = new HashMap<>();
+    private final Map<String, Topic> topiksMap = new HashMap<>();
+    private final BrokerStats stats;
+
+    public ReentrantRWBroker(BrokerStats stats) {
+        this.stats = stats;
+    }
 
     public int creatTopic(String name){
         lock.writeLock().lock();
@@ -91,7 +98,8 @@ public class ReentrantRWBroker {
         }
     }
 
-    public int publish(Client client, String name, Message message){
+    public int publish(Message message){
+        String name = message.getTopic();
         lock.readLock().lock();
         try{
             if (name == null || !name.matches("[a-zA-Z0-9._-]{1,64}")) {
@@ -102,16 +110,12 @@ public class ReentrantRWBroker {
                 return 3; // топик не найден
             }
 
-            Message delivered = new Message(name, client.getId(), message.getBody(),
-                    message.getRequestId(), topic.nextSeq());
+            Message delivered = message.withSeq(topic.nextSeq());
             for(Client sub : topic.getSubscribers()){
-                try {
-                    sub.addNewMessage(delivered);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return 2; // ошибка запроса
-                } catch (IllegalStateException e) {
-                    // клиент уже отключился и закрыл свою очередь
+                if (sub.addNewMessage(delivered)) {
+                    stats.incDelivered(name);
+                } else {
+                    stats.incDropped(name);
                 }
             }
             return 0;

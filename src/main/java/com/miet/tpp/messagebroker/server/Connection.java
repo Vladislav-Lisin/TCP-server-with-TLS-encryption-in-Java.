@@ -5,7 +5,9 @@ import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 import com.miet.tpp.messagebroker.brokerQueue.ArrayBlockingMessageQueue;
@@ -15,8 +17,9 @@ import com.miet.tpp.messagebroker.codec.FrameReader;
 import com.miet.tpp.messagebroker.codec.FrameWriter;
 import com.miet.tpp.messagebroker.codec.Reader;
 import com.miet.tpp.messagebroker.codec.Writer;
+import com.miet.tpp.messagebroker.messages.Broker;
 import com.miet.tpp.messagebroker.messages.Client;
-import com.miet.tpp.messagebroker.messages.ReentrantRWBroker;
+import com.miet.tpp.messagebroker.stats.BrokerStats;
 
 /**
  * Connection
@@ -27,27 +30,27 @@ public class Connection {
     private final Socket socket;
     private final FrameReader frameReader;
     private final FrameWriter frameWriter;
-    private final ReentrantRWBroker broker;
+    private final Broker broker;
     private final IBlockingQueue inputQueue;
+    private final ClientRegistry clientRegistry;
+    private final BrokerStats stats;
+    private final Executor executor;
     private final Consumer<Connection> onClose;
-    private final Object writeLock = new Object();
+    private final ReentrantLock writeLock = new ReentrantLock();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private volatile Client client;
     private volatile IBlockingQueue outgoingMessages;
-    private Thread readerThread;
-    private Thread writerThread;
 
-    public Connection(Socket socket, ReentrantRWBroker broker, IBlockingQueue inputQueue)
-            throws IOException {
-        this(socket, broker, inputQueue, null);
-    }
-
-    public Connection(Socket socket, ReentrantRWBroker broker, IBlockingQueue inputQueue,
-                      Consumer<Connection> onClose) throws IOException {
+    public Connection(Socket socket, Broker broker, IBlockingQueue inputQueue,
+                      ClientRegistry clientRegistry, BrokerStats stats,
+                      Executor executor, Consumer<Connection> onClose) throws IOException {
         this.socket = socket;
         this.broker = broker;
         this.inputQueue = inputQueue;
+        this.clientRegistry = clientRegistry;
+        this.stats = stats;
+        this.executor = executor;
         this.onClose = onClose;
 
         FrameReader reader;
@@ -68,37 +71,44 @@ public class Connection {
     }
 
     public void start() {
-        if (readerThread != null) {
-            throw new IllegalStateException("connection already started");
-        }
-        readerThread = new Thread(new Reader(this),
-                "reader-" + socket.getRemoteSocketAddress());
-        readerThread.start();
+        executor.execute(new Reader(this));
     }
 
-    public void initClient(String clientId) {
+    /** false — clientId уже занят или соединение закрыто. */
+    public boolean initClient(String clientId) {
         synchronized (this) {
-            if (closed.get()) {
-                throw new IllegalStateException("connection is closed");
+            if (closed.get() || client != null) {
+                return false;
             }
-            if (client != null) {
-                throw new IllegalStateException("client already connected");
+            if (!clientRegistry.tryRegister(clientId)) {
+                return false;
             }
 
             IBlockingQueue outgoing = new ArrayBlockingMessageQueue(OUTGOING_QUEUE_CAPACITY);
             this.outgoingMessages = outgoing;
             this.client = new Client(clientId, outgoing);
-            this.writerThread = new Thread(new Writer(this), "writer-" + clientId);
-            this.writerThread.start();
+            try {
+                executor.execute(new Writer(this));
+            } catch (RuntimeException e) {
+                this.client = null;
+                this.outgoingMessages = null;
+                outgoing.close();
+                clientRegistry.unregister(clientId);
+                throw e;
+            }
+            return true;
         }
     }
 
     public void send(Frame frame) throws IOException {
-        synchronized (writeLock) {
+        writeLock.lock();
+        try {
             if (closed.get()) {
                 throw new IOException("connection is closed");
             }
             frameWriter.writeFrame(frame);
+        } finally {
+            writeLock.unlock();
         }
     }
 
@@ -106,7 +116,7 @@ public class Connection {
         return frameReader;
     }
 
-    public ReentrantRWBroker getBroker() {
+    public Broker getBroker() {
         return broker;
     }
 
@@ -116,6 +126,10 @@ public class Connection {
 
     public Client getClient() {
         return client;
+    }
+
+    public BrokerStats getStats() {
+        return stats;
     }
 
     public boolean isClosed() {
@@ -135,20 +149,12 @@ public class Connection {
         Client current = client;
         if (current != null) {
             broker.unsubscribeAll(current);
+            clientRegistry.unregister(current.getId());
         }
 
         try {
             socket.close();
         } catch (IOException ignored) {
-        }
-
-        Thread rt = readerThread;
-        if (rt != null) {
-            rt.interrupt();
-        }
-        Thread wt = writerThread;
-        if (wt != null) {
-            wt.interrupt();
         }
 
         if (onClose != null) {

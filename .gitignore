@@ -4,6 +4,8 @@ target/
 *.war
 *.log
 
+stats.json
+
 .idea/
 *.iml
 .vscode/
